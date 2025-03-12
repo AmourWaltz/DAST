@@ -8,7 +8,6 @@ import time
 import json
 from typing import Optional, Sequence, Union
 
-import tqdm
 import copy
 
 from datetime import datetime
@@ -18,10 +17,27 @@ import torch
 import bitsandbytes as bnb
 
 
+# Constants
+IGNORE_INDEX = -100
+DEFAULT_PAD_TOKEN = "[PAD]"
+DEFAULT_EOS_TOKEN = "</s>"
+DEFAULT_BOS_TOKEN = "<s>"
+DEFAULT_UNK_TOKEN = "<unk>"
+
 model_path_dict = {
-    "llama3": "/workspace/model/Meta-Llama-3.1-8B-Instruct",
-    "qwen2": "/workspace/model/Qwen2-7B-Instruct"
+    "llama31_ins": "/workspace/model/Meta-Llama-3.1-8B-Instruct",
+    "llama31": "/workspace/model/Llama-3.1-8B",
+    "llama31": "/workspace/model/Llama-3.1-8B",
+    "llama3_70": "meta-llama/Meta-Llama-3-70B",
+    "llama3": "/workspace/model/Meta-Llama-3-8B",
+    "qwen2": "/workspace/model/Qwen2-7B-Instruct",
+    "qwen25": "/workspace/model/Qwen2.5-Math-7B",
+    "qwen25_ins": "/workspace/model/Qwen2.5-Math-7B-Instruct",
+    "mistral": "/workspace/model/Mistral-7B-v0.1",
+    "mathstral": "/workspace/model/Mathstral-7B-v0.1",
 }
+
+dataset_list = ["triviaqa", "webqa", "gsm8k", "marith", "svamp", "asdiv", "math", "college", "theorem", "talscq", "comb"]
 
 Levels = {
     1: "Certain",
@@ -142,6 +158,7 @@ Model parameters utils
 """
 def find_all_linear_names(model):
     cls = bnb.nn.Linear4bit
+    # print(f"Finding all {cls} in model...")
     lora_module_names = set()
     for name, module in model.named_modules():
         if isinstance(module, cls):
@@ -151,16 +168,17 @@ def find_all_linear_names(model):
     return list(lora_module_names)
 
 
+"""
+Prints the number of trainable parameters in the model.
+"""
 def print_trainable_parameters(model):
-  """
-  Prints the number of trainable parameters in the model.
-  """
-  trainable_params = 0
-  all_param = 0
-  for _, param in model.named_parameters():
-    all_param += param.numel()
-    if param.requires_grad:
-      trainable_params += param.numel()
-  print(
-      f"trainable params: {trainable_params} || all params: {all_param} || trainables%: {100 * trainable_params / all_param}"
-  )
+    trainable_params = 0
+    all_param = 0
+    for _, param in model.named_parameters():
+        all_param += param.numel()
+        if param.requires_grad:
+            trainable_params += param.numel()
+
+    train_paras = f"trainable params: {trainable_params} || all params: {all_param} || trainables%: {100 * trainable_params / all_param}"
+    print(train_paras)
+    return train_paras

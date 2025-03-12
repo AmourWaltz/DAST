@@ -1,0 +1,63 @@
+{
+    "description": "Standard English Math Reasoning Template for CollegeMath.",
+    "instruction": "You are an excellent mathematician. Answer the following mathematical questions.",
+    "standard_prompt": "{instruction}\n\nQuestion: {question}\nResponse: ",
+    "few_shot_prompt": "{instruction}\n\n{examples}\n\nQuestion: {question}\nResponse: ",
+    "few_shot_split": {
+        "input": "Question: ", 
+        "output": "Response: "
+    },
+    "output_split": "Question:",
+    "generate_few_shot_examplar": {
+        "examplar_1": [
+            {
+                "question_id": "3",
+                "difficulty": "4",
+                "question": "Compute the average angular acceleration and the angular displacement during the 2 seconds a rotating object speeds up from 0.5 rad/s to 0.7 rad/s. ",
+                "answer": "a = 0.1 rad/s\\textsuperscript{2~}$\\Delta\\theta$~= 1.2 radians"
+            },
+            {
+                "question_id": "12",
+                "difficulty": "4",
+                "question": "A 35 kg child ziplines from rest on a platform 12 m high to the ground with negligible friction. In the last 8 m of the zipline, which is approximately horizontal, a braking mechanism applies a constant force opposing the motion to slow the child down so that she\\textquotesingle s traveling at 2.5 m/s when she finally lands on the safety padding at the end. The padding compresses for1.5 s when the child lands on it and stops.  $\\textasciitilde$  What is the magnitude of the force applied by the braking mechanism? ",
+                "answer": "$511N$"
+            },
+            {
+                "question_id": "14",
+                "difficulty": "0",
+                "question": "The $$7$$-digit number $$\\overline{123P688}$$ is divisible by $$8$$. How many possible values are there for $$P$$? ",
+                "answer": "$10$"
+            },
+            {
+                "question_id": "18",
+                "difficulty": "0",
+                "question": "What is the value of the digit $7$ in the number $32.679$? ",
+                "answer": "seven hundredths"
+            },
+            {
+                "question_id": "23",
+                "difficulty": "1",
+                "question": "George buys boxes of mangoes for $$$16$$ each and sells them for $$$23$$ per box. How many boxes of mangoes would he have to sell to make $$$56$$? ",
+                "answer": "$8$"
+            },
+            {
+                "question_id": "25",
+                "difficulty": "1",
+                "question": "Find a whole number between $$0$$ and $$100$$ that has the following properties.  When the number is divided by $$5$$ the remainder is $$4$$.  When the number is divided by $$6$$ the remainder is $$0$$.  When the number is divided by $$7$$ the remainder is $$0$$.  What is the number? ",
+                "answer": "$84$"
+            },
+            {
+                "question_id": "27",
+                "difficulty": "1",
+                "question": "l am a four$$-$$digit number. The digit in the ones place is $$9$$. The digit in the thousands place has a value of $$1000$$. The digit in the tens place is twice the digit in the hundreds place. What number am I? ",
+                "answer": "$1249$"
+            },
+            {
+                "question_id": "28",
+                "difficulty": "1",
+                "question": "Without calculating, determine if the following sums are odd or even.  $$25\\times 3$$ is an~\\uline{~~~~~~~~~~}~number，$$45\\times 2$$ is an~\\uline{~~~~~~~~~~}~number，$$33\\times 5\\times 7\\times 9\\times 8\\times 11\\times 13$$ is an~\\uline{~~~~~~~~~~}~number． ~\\hspace{0pt}\\hspace{0pt}\\hspace{0pt}\\hspace{0pt}\\hspace{0pt}\\hspace{0pt} ",
+                "answer": "odd, even, even"
+            }
+        ]
+    }
+}

@@ -11,8 +11,7 @@ sentencepiece
 gradio
 wandb
 openai
-fire
-rouge_score
 numpy
 pytz
 matplotlib
+latex2sympy2

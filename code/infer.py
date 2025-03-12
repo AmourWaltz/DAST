@@ -1,10 +1,9 @@
 r"""
 Author: XUE Boyang      Filename: infer.py
 Afflition: MoE Key Lab, The Chinese University of Hong Kong.
-Description: Inference decoding on validation set.
+Description: Inference decoding on test sets.
 """
 import os
-import sys
 import time
 import copy
 import logging
@@ -17,45 +16,80 @@ import random
 
 import torch
 import transformers
-from transformers import GenerationConfig, BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
+from torch import distributed as dist
+from torch.nn.parallel import DataParallel as DP
+from torch.nn.parallel import DistributedDataParallel as DDP
+from transformers import set_seed, GenerationConfig, BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer
 
-from utils import format_seconds, read_jsonl, jsonl2json, model_path_dict
+from vllm import LLM, SamplingParams
 
-DEFAULT_PAD_TOKEN = "[PAD]"
-DEFAULT_EOS_TOKEN = "</s>"
-DEFAULT_BOS_TOKEN = "<s>"
-DEFAULT_UNK_TOKEN = "<unk>"
-
-device = torch.device("cuda")
+from utils import *
 
 
 @dataclass
 class ModelArguments:
-    model_name: str = field(default="llama3", metadata={"help": "Model name.", "choices": ["llama3", "qwen2"]})
+    model_type: str = field(default="vanilla", metadata={"help": "Model type.", "choices": ["vanilla", "tune"]})
+    model_name: str = field(default="llama31_ins", metadata={"help": "Model name.", "choices": model_path_dict.keys()})
+    train_path: str = field(default="./exp/{}/train", metadata={"help": "Directory to save the training results."})
+    save_suffix: str = field(default="base_train", metadata={"help": "Suffix of the saved model."})
+    # LoRA setting
+    lora_use: bool = field(default=False, metadata={"help": "Use LoRA or not."})
+    lora_weights: str = field(default="./exp/{}/train", metadata={"help": "LoRA weights path."})
+    model_suffix: str = field(default="no_lora", metadata={"help": "File name to save the results."})
+    # Bits and Bytes config
+    bnb_use: bool = field(default=False, metadata={"help": "Whether to use BitsAndBytesConfig."})
+    load_in_4bit: bool = field(default=False, metadata={"help": "Whether to enable 4-bit quantization."})
+    bnb_4bit_quant_type: str = field(default="nf4", metadata={"help": "Set the quantization data type in the bnb.nn.Linear4Bit layers", "choices": ["fp4", "nf4"]})
+    bnb_4bit_compute_dtype: torch.dtype = field(default=torch.float16, metadata={"help": "Set the computational type which might be different than the input type."})
+    # Tokenizer setting
     model_max_length: int = field(default=2048, metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."})
+    use_fast: bool = field(default=False, metadata={"help": "Whether to use rust based fast tokenizer."})
+    padding_side: str = field(default="right", metadata={"help": "Padding side for sequences with different length."})
+    trust_remote_code: bool = field(default=False, metadata={"help": "Whether or not to allow for custom models defined on the Hub in their own modeling files."})
+    # vLLM setting
+    vllm_use: bool = field(default=False, metadata={"help": "Use vLLM or not."})
+    gpu_memory_utilization: float = field(default=0.65, metadata={"help": "GPU memory utilization."})
 
 
 @dataclass
 class DataArguments:
-    data_dir: str = field(default="./data/{}/prep", metadata={"help": "Directory to save data."})
-    dataset: str = field(default="triviaqa", metadata={"help": "Dataset name.", "choices": ["triviaqa", "webqa", "gsm8k"]})
-    data_file: str = field(default="validation", metadata={"help": "Data file name."})
+    data_dir: str = field(default="./data/{}/raw", metadata={"help": "Directory to save data."})
+    dataset: str = field(default="triviaqa", metadata={"help": "Dataset name.", "choices": dataset_list})
+    data_file: str = field(default="test", metadata={"help": "Data file name."})
     prompt_dir: str = field(default="./prompt/", metadata={"help": "Path to the prompt."})
     continue_generate: bool = field(default=False, metadata={"help": "Continue from the previous generations."})
+    split_id: int = field(default=0, metadata={"help": "Split id for inference."})
+    split_num: int = field(default=1, metadata={"help": "Number if splited subsets."})
 
 
 @dataclass
 class InferenceArguments:
-    icl_use: bool = field(default=True, metadata={"help": "Use few-shot prompt or not."})
+    icl_use: bool = field(default=False, metadata={"help": "Use few-shot prompt or not."})
     do_sample: bool = field(default=False, metadata={"help": "Whether to use sampling or not."})
     output_dir: str = field(default="./exp/{}/infer", metadata={"help": "Directory to save results."})
-    suffix: str = field(default="vanilla", metadata={"help": "File name to save the results."})
     num_sampling: int = field(default=5, metadata={"help": "Number of samples."})
     temperature: float = field(default=0.8, metadata={"help": "Temperature for sampling."})
     top_p: float = field(default=1.0, metadata={"help": "Top p for sampling."})
     top_k: int = field(default=40, metadata={"help": "Top k for sampling."})
     num_beams: int = field(default=1, metadata={"help": "Number of beams for sampling."})
     max_length: int = field(default=16, metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."})
+    repetition_penalty: float = field(default=1.1, metadata={"help": "Repetition penalty."})
+
+
+@dataclass
+class DeviceArguments:
+    device: str = field(default="cuda", metadata={"help": "Device to use."})
+    seed: int = field(default=3407, metadata={"help": "Random seed."})
+    gpu_num: int = field(default=1, metadata={"help": "Number of GPUs."})
+    local_rank: int = field(default=0, metadata={"help": "Local rank."})
+    global_rank: int = field(default=0, metadata={"help": "Global rank."})
+    world_size: int = field(default=0, metadata={"help": "World size."})
+
+
+# Parse arguments.
+parser = transformers.HfArgumentParser((ModelArguments, DataArguments, InferenceArguments, DeviceArguments))
+model_args, data_args, infer_args, device_args = parser.parse_args_into_dataclasses()
 
 
 # Resize tokenizer and embedding.
@@ -88,34 +122,44 @@ def format_examplar(few_shot_examplars, examplar_split):
     for few_shot_examplar in few_shot_examplars.values():
         few_shot_examplas = []
         for few_shot_example in few_shot_examplar:
-            few_shot_examplas.append(f"{examplar_split["input"]}{few_shot_example["question"]}\n{examplar_split["output"]}{few_shot_example["answer"]}")
+            few_shot_examplas.append("{}{}\n{}{}".format(examplar_split["input"], few_shot_example["question"], 
+                                                         examplar_split["output"], few_shot_example["answer"]))
         few_shot_examplar_list.append("\n\n".join(few_shot_examplas))
 
     return few_shot_examplar_list
 
 
 # Split the generation to get the answer part.
-def output_split(output, tokenizer, split_len, dataset, prompt_split):
-    if dataset in ["triviaqa", "webqa"]:
-        return tokenizer.decode(output.sequences[0][split_len:], 
-                                skip_special_tokens=True).split("###")[0].replace("\n", "").lstrip()
-    elif dataset == "gsm8k":
-        return tokenizer.decode(output.sequences[0][split_len:], 
-                                skip_special_tokens=True).split(prompt_split)[0]
+def output_split(output, tokenizer, split_len, prompt_split, vllm_use):
+    if vllm_use:
+        text = output[0].outputs[0].text
+        return text, text.split(prompt_split)[0]
+    else:
+        text = tokenizer.decode(output.sequences[0][split_len:], skip_special_tokens=True)
+        return text, text.split(prompt_split)[0]
 
 
 def infer():
     # import pdb; pdb.set_trace()
-    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, InferenceArguments))
-    model_args, data_args, infer_args = parser.parse_args_into_dataclasses()
+    # Info: Device settings: random seed, using cuda or not, distributed setting.
+    set_seed(device_args.seed)
+
+    device_args.num_gpu = torch.cuda.device_count()
+    device_args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Set up logging.
     infer_args.output_dir = os.path.join(infer_args.output_dir.format(data_args.dataset), 
-                                         f"{model_args.model_name}_{data_args.dataset}_{data_args.data_file}_{infer_args.suffix}")
+                                         "{}_{}_{}{}{}".format(model_args.model_name, 
+                                                              data_args.dataset, 
+                                                              model_args.model_suffix,
+                                                              "_vllm" if model_args.vllm_use else "",
+                                                              "_icl" if infer_args.icl_use else ""))
+
     if not os.path.exists(infer_args.output_dir):
         os.makedirs(infer_args.output_dir)
 
-    infer_args.log_path = os.path.join(infer_args.output_dir, f"generate.log")
+    infer_args.log_path = os.path.join(infer_args.output_dir, f"{data_args.data_file}_generate.log" \
+                                      if data_args.split_num == 0 else f"{data_args.data_file}_generate_{data_args.split_id}.log")
 
     logging.basicConfig(
         filename=infer_args.log_path,
@@ -125,49 +169,65 @@ def infer():
     )
 
     # Load model and tokenizer.
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=False,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16
-    )
+    if model_args.bnb_use:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=model_args.load_in_4bit,
+            bnb_4bit_quant_type=model_args.bnb_4bit_quant_type,
+            bnb_4bit_compute_dtype=model_args.bnb_4bit_compute_dtype
+        )
+        logging.info(f"BitsAndBytes use.")
+    else:
+        logging.info(f"No BitsAndBytes use.")
 
-    model_name_or_path = model_path_dict[model_args.model_name]
+    # Parse the model name or path.
+    if model_args.model_type == "vanilla":
+        model_name_or_path = model_path_dict[model_args.model_name]
+    elif model_args.model_type == "tune":
+        model_name_or_path = os.path.join(model_args.train_path.format(data_args.dataset), 
+                                          f"{model_args.model_name}_{data_args.dataset}_{model_args.save_suffix}")
+
     logging.info(f"Loading model and tokenizer from {model_name_or_path} ...")
-    model = AutoModelForCausalLM.from_pretrained(
-        pretrained_model_name_or_path=model_name_or_path,
-        torch_dtype=torch.float16,
-        # quantization_config=bnb_config,
-        device_map="balanced" # device_map: "auto", "balanced", "balanced_low_0", "sequential"
-    )
+    if model_args.vllm_use:
+        model = LLM(model=model_name_or_path,
+                    dtype=torch.float16,
+                    max_model_len=model_args.model_max_length,
+                    # quantization=bnb_config if model_args.bnb_use else None,
+                    gpu_memory_utilization=model_args.gpu_memory_utilization)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            pretrained_model_name_or_path=model_name_or_path,
+            torch_dtype=torch.float16,
+            quantization_config=bnb_config if model_args.bnb_use else None,
+            device_map="balanced" # device_map: "auto", "balanced", "balanced_low_0", "sequential"
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(
         pretrained_model_name_or_path=model_name_or_path,
         model_max_length=model_args.model_max_length,
-        padding_side="right",
-        use_fast=False,
+        padding_side=model_args.padding_side,
+        use_fast=model_args.use_fast
     )
 
     # Resize tokenizer and embedding.
-    special_tokens_dict = dict()
+    # import pdb; pdb.set_trace()
     if tokenizer.pad_token is None:
-        special_tokens_dict["pad_token"] = DEFAULT_PAD_TOKEN
-    if tokenizer.eos_token == "":
-        special_tokens_dict["eos_token"] = DEFAULT_EOS_TOKEN
-    if tokenizer.bos_token == "":
-        special_tokens_dict["bos_token"] = DEFAULT_BOS_TOKEN
-    if tokenizer.unk_token == "":
-        special_tokens_dict["unk_token"] = DEFAULT_UNK_TOKEN
+        tokenizer.add_special_tokens({'pad_token': DEFAULT_PAD_TOKEN})
 
-    smart_tokenizer_and_embedding_resize(
-        special_tokens_dict=special_tokens_dict,
-        tokenizer=tokenizer,
-        model=model,
-    )
+    if model_args.lora_use:
+        model_args.lora_weights = os.path.join(model_args.lora_weights.format(data_args.dataset), 
+                                         f"{model_args.model_name}_{data_args.dataset}_{model_args.model_suffix}")
+        model = PeftModel.from_pretrained(
+            model,
+            model_id=model_args.lora_weights,
+            torch_dtype=torch.float16
+        )
 
+    # print(device)
     # Load data.
     # import pdb; pdb.set_trace()
     data_path = os.path.join(data_args.data_dir.format(data_args.dataset), 
-                                  "{}_{}_{}_{}.json".format(model_args.model_name, data_args.dataset, data_args.data_file, infer_args.suffix))
+                                  "{}.json".format(data_args.data_file))
+
     logging.info(f"Loading data from {data_path} ...")
     dataset = json.load(open(data_path))
 
@@ -183,17 +243,23 @@ def infer():
     else:
         prompt_input = prompt_template["standard_prompt"]
 
-
     # Format the output file.
     # import pdb; pdb.set_trace()
-    infer_args.save_path = os.path.join(infer_args.output_dir, "generate.json")
+    infer_args.save_path = os.path.join(infer_args.output_dir, f"{data_args.data_file}_generate.json" \
+                                        if data_args.split_num == 0 else f"{data_args.data_file}_generate_{data_args.split_id}.json")
     if data_args.continue_generate:
         exist_num = len(read_jsonl(infer_args.save_path))
         # Split the dataset if needed.
-        dataset = dataset[exist_num*data_args.sample_interval::]
+        dataset = dataset[exist_num::]
     else:
-        # dataset = dataset[:3]
         open(infer_args.save_path, "w").close()
+
+    # Split the dataset if needed.
+    if data_args.split_num > 1:
+        data_len = len(dataset)
+        split_len = (data_len // data_args.split_num) + 1
+        dataset = dataset[data_args.split_id * split_len:(data_args.split_id + 1) * split_len]
+        logging.info(f"Data length: {data_len}; Start from {dataset[0]['question_id']}; End at {dataset[-1]['question_id']}")
 
     data_len = len(dataset)
 
@@ -203,63 +269,86 @@ def infer():
     # Sample the data.
     start_time = time.time()
     logging.info("Start generating ...")
-    log_flag = True
+    first_log_flag = True
+
+    # Set up the decoding configuration.
+    if model_args.vllm_use:
+        temperature = infer_args.temperature if infer_args.do_sample else 0.0
+        # print(temperature)
+        sampling_params = SamplingParams(
+            temperature=temperature,
+            top_p=infer_args.top_p,
+            top_k=infer_args.top_k,
+            max_tokens=infer_args.max_length,
+            repetition_penalty=infer_args.repetition_penalty
+        )
+        logging.info(sampling_params)
+    else:
+        generation_config = GenerationConfig(
+            do_sample=True,
+            temperature=infer_args.temperature,
+            top_p=infer_args.top_p,
+            top_k=infer_args.top_k,
+            num_beams=infer_args.num_beams,
+            repetition_penalty=infer_args.repetition_penalty
+        ) if infer_args.do_sample \
+        else GenerationConfig(
+            do_sample=False,
+            num_beams=infer_args.num_beams,
+            repetition_penalty=infer_args.repetition_penalty)
+        logging.info(generation_config)
+        
     with tqdm(total=data_len) as t:
-        for idx, data_point in enumerate(dataset):
-            # import pdb; pdb.set_trace()
-            # time.sleep(1)
+        for idx, batch in enumerate(dataset):
             if infer_args.icl_use:
-                # import pdb; pdb.set_trace()
                 few_shot_examplar = random.choice(few_shot_examplar_list)
-                input_ids = tokenizer(prompt_input.format(instruction=instruction,
-                                                            examples=few_shot_examplar,
-                                                            question=data_point["question"]), 
-                                                            return_tensors="pt")["input_ids"].to(device)
+                input_tokens = prompt_input.format(instruction=instruction, examples=few_shot_examplar, question=batch["question"])
             else:
-                input_ids = tokenizer(prompt_input.format(instruction=instruction, 
-                                                          question=data_point["question"]), 
-                                                          return_tensors="pt")["input_ids"].to(device)
-                
+                input_tokens = prompt_input.format(instruction=instruction, question=batch["question"])
+    
             with torch.no_grad():
-                generation_config = GenerationConfig(
-                    do_sample=True,
-                    temperature=infer_args.temperature,
-                    top_p=infer_args.top_p,
-                    top_k=infer_args.top_k,
-                    num_beams=infer_args.num_beams,
-                    repetition_penalty=1.1
-                ) if infer_args.do_sample \
-                else GenerationConfig(
-                    do_sample=False,
-                    num_beams=infer_args.num_beams,
-                    repetition_penalty=1.1)
+                if model_args.vllm_use:
+                    # import pdb; pdb.set_trace()
+                    generation = model.generate(input_tokens, sampling_params)
+                    output_sequence, generated_text = output_split(generation, None, None, prompt_split, model_args.vllm_use)
+                else:
+                    # import pdb; pdb.set_trace()
+                    # time.sleep(1)
+                    input_ids = tokenizer(input_tokens, padding=True, return_tensors="pt")["input_ids"].to(device_args.device)
+                    # print(input_ids.size())
 
-                generation = model.generate(input_ids,
-                                        generation_config=generation_config,
-                                        return_dict_in_generate=True,
-                                        output_scores=True,
-                                        max_new_tokens=infer_args.max_length,
-                                        pad_token_id=tokenizer.pad_token_id,
-                                        eos_token_id=tokenizer.eos_token_id, 
-                                        bos_token_id=tokenizer.bos_token_id)
+                    # print(model.module.device)
+                    # print(input_ids.device)
 
-                # import pdb; pdb.set_trace()
-                generation = output_split(generation, tokenizer, len(input_ids[0]), data_args.dataset, prompt_split)
+                    generation = model.generate(input_ids,
+                                            generation_config=generation_config,
+                                            return_dict_in_generate=True,
+                                            output_scores=True,
+                                            max_new_tokens=infer_args.max_length,
+                                            pad_token_id=tokenizer.pad_token_id,
+                                            eos_token_id=tokenizer.eos_token_id, 
+                                            bos_token_id=tokenizer.bos_token_id)
 
-                if log_flag:
-                    logging.info(f"Input Prompt: \n{prompt_input.format(instruction=instruction, examples=few_shot_examplar, question=data_point["question"])}")
-                    logging.info(f"LLM Generation: \n{generation}")
-                    log_flag = False
+                    # import pdb; pdb.set_trace()
+                    output_sequence, generated_text = output_split(generation, tokenizer, len(input_ids[0]), prompt_split, model_args.vllm_use)
+                    pass
+                pass
+
+            if first_log_flag:
+                logging.info("Input Prompt: \n{}".format(prompt_input.format(instruction=instruction, examples=few_shot_examplar, question=batch["question"]) \
+                                                            if infer_args.icl_use else prompt_input.format(instruction=instruction, question=batch["question"])))
+                logging.info("LLM Generation: \n{}".format(generation))
+                first_log_flag = False
 
             # print(data_point)
             instance = {
-                "question_id": data_point["question_id"] if "question_id" in data_point.keys() else f"id_{idx+1}",
-                "question": data_point["question"],
-                "answer": data_point["answer"],
-                "output": generation,
-                "greedy_scores_avg": data_point["scores"]["greedy_scores_avg"],
-                "sample_scores_avg": data_point["scores"]["sample_scores_avg"]
+                "question_id": batch["question_id"] if "question_id" in batch.keys() else f"id_{idx+1}",
+                "question": batch["question"],
+                "answer": batch["answer"],
+                "generation": output_sequence,
+                "output": generated_text
             }
+
             # print(instance)
 
             # Real-time saving the results.
@@ -276,7 +365,7 @@ def infer():
 
     # Convert jsonl to json format.
     logging.info("Generating is done.")
-    jsonl2json(infer_args.save_path, infer_args.save_path)
+    # jsonl2json(infer_args.save_path, infer_args.save_path)
     logging.info(f"Save to {infer_args.save_path}")
 
 

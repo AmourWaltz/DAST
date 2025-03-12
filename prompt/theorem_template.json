@@ -1,0 +1,71 @@
+{
+    "description": "Standard English Math Reasoning Template for CollegeMath.",
+    "instruction": "You are an excellent mathematician. Answer the following mathematical questions.",
+    "standard_prompt": "{instruction}\n\nQuestion: {question}\nResponse: ",
+    "few_shot_prompt": "{instruction}\n\n{examples}\n\nQuestion: {question}\nResponse: ",
+    "few_shot_split": {
+        "input": "Question: ", 
+        "output": "Response: "
+    },
+    "output_split": "Question:",
+    "generate_few_shot_examplar": {
+        "examplar_1": [
+            {
+                "question_id": "1",
+                "question": "How many ways are there to divide a set of 8 elements into 5 non-empty ordered subsets?",
+                "answer": "11760",
+                "answer_type": "integer",
+                "Picture": false
+            },
+            {
+                "question_id": "2",
+                "question": "what is the value of $\\int_{-infty}^{+infty} sin(3*t)*sin(t/\\pi)/t^2 dt$?",
+                "answer": "1.0",
+                "answer_type": "float",
+                "Picture": false
+            },
+            {
+                "question_id": "3",
+                "question": "Consider the following graph, with links costs listed, and assume we are using shortest-path (or lowest-cost) routing, and that routing has equilibrated to a constant set of routing tables. The routing algorithm uses poisoned reverse, advertising an infinite weight for the poisoned paths. What distance does C advertise to B?",
+                "answer": "5",
+                "answer_type": "integer",
+                "Picture": true
+            },
+            {
+                "question_id": "4",
+                "question": "Please solve the equation 2*x^3 + e^x = 10 using newton-raphson method.",
+                "answer": "1.42",
+                "answer_type": "float",
+                "Picture": false
+            },
+            {
+                "question_id": "5",
+                "question": "Let V be the space of all infinite sequences of real numbers. Consider the transformation T(x_0, x_1, x_2, ...) = (x_1, x_2, x_3, ...) from V to V. Is the sequence (1,2,3,...) in the image of T?",
+                "answer": "True",
+                "answer_type": "integer",
+                "Picture": false
+            },
+            {
+                "question_id": "6",
+                "question": "Let a undirected graph G with edges E = {<0,1>,<0,2>,<0,3>,<0,5>,<2,3>,<2,4>,<4,5>}, which <A,B> represent Node A is connected to Node B. What is the shortest path from node 0 to node 5? Represent the path as a list.",
+                "answer": "[0, 5]",
+                "answer_type": "list of integer",
+                "Picture": false
+            },
+            {
+                "question_id": "7",
+                "question": "Let a undirected graph G with edges E = {<0,2>,<2,1>,<2,3>,<3,4>,<4,1>}, which <A,B> represent Node A is connected to Node B. What is the shortest path from node 4 to node 0? Represent the path as a list.",
+                "answer": "[4, 1, 2, 0]",
+                "answer_type": "list of integer",
+                "Picture": false
+            },
+            {
+                "question_id": "8",
+                "question": "Compute $\\int_{|z| = 1} z^2 sin(1/z) dz$. The answer is Ai with i denoting the imaginary unit, what is A?",
+                "answer": "-1.047",
+                "answer_type": "float",
+                "Picture": false
+            }
+        ]
+    }
+}

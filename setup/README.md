@@ -29,7 +29,7 @@ Under `./setup`
 curl -o Anaconda3.sh https://repo.anaconda.com/archive/Anaconda3-2024.06-1-Linux-x86_64.sh
 
 bash Anaconda3.sh
-source ~/.bashrc 
+source ~/.bashrc
 rm Anaconda3.sh
 ```
 
@@ -68,7 +68,7 @@ mkdir refact
 git clone https://github.com/AmourWaltz/ReFact
 cd ReFact
 
-conda create -n refact python=3.12
+conda create -n refact python=3.11
 conda activate refact
 
 pip install -U -r requirements.txt

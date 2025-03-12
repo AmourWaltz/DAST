@@ -1,0 +1,55 @@
+{
+    "description": "Standard English Math Reasoning Template for CollegeMath.",
+    "instruction": "You are an excellent mathematician. Answer the following mathematical questions.",
+    "standard_prompt": "{instruction}\n\nQuestion: {question}\nResponse: ",
+    "few_shot_prompt": "{instruction}\n\n{examples}\n\nQuestion: {question}\nResponse: ",
+    "few_shot_split": {
+        "input": "Question: ", 
+        "output": "Response: "
+    },
+    "output_split": "Question:",
+    "generate_few_shot_examplar": {
+        "examplar_1": [
+            {
+                "question_id": "1",
+                "question": "Find product: $(-7)(8)$",
+                "answer": "-56"
+            },
+            {
+                "question_id": "2",
+                "question": "Simplify: $-3 \\sqrt{18}-\\sqrt{8}+2 \\sqrt{8}+2 \\sqrt{8}$",
+                "answer": "$-3 \\sqrt{2}$"
+            },
+            {
+                "question_id": "3",
+                "question": "Simplify: $6 \\sqrt{50 a^{4} b c^{2}}$",
+                "answer": "$30 a^{2} c \\sqrt{2 b}$"
+            },
+            {
+                "question_id": "4",
+                "question": "Divide: $\\frac{45 p^{2}+56 p+19}{9 p+4}$",
+                "answer": "$5 p+4+\\frac{3}{9 p+4}$"
+            },
+            {
+                "question_id": "5",
+                "question": "Find the angle measure to the nearest degree given $\\sin \\mathrm{Y}=0.6561$",
+                "answer": "$41^{\\circ}$"
+            },
+            {
+                "question_id": "6",
+                "question": "Solve the following systems of equation: \n$4 x+12 y+16 z=0$\n$3 x+4 y+5 z=0$\n$x+8 y+11 z=0$",
+                "answer": "$\\propto$ solutions"
+            },
+            {
+                "question_id": "7",
+                "question": "Evaluate the expression: $\\log _{4} \\frac{1}{64}$",
+                "answer": "-3"
+            },
+            {
+                "question_id": "8",
+                "question": "Given $p(t)=-2 \\cdot 4^{2 t+1}+1$, find $p(-2)$",
+                "answer": "$\\frac{31}{32}$"
+            }
+        ]
+    }
+}

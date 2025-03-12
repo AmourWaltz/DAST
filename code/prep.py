@@ -16,11 +16,11 @@ import json
 import datasets
 import pandas as pd
 
-from utils import read_json, read_jsonl, write_json, write_jsonl
+from utils import *
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default="webqa", choices=["triviaqa", "webqa", "gsm8k"])
-parser.add_argument('--output_dir', type=str, default="./data/{}")
+parser.add_argument('--dataset', type=str, default="webqa", choices=dataset_list)
+parser.add_argument('--output_dir', type=str, default="./data/{}/raw")
 args = parser.parse_args()
 
 
@@ -159,6 +159,219 @@ def get_gsm8k_dataset(output_dir):
         with open(save_path, "w") as fw:
             json.dump(fp=fw, obj=data_set, indent=4, ensure_ascii=False)
 
+"""
+ASDIV dataset preparation and saving
+"""
+def prep_asdiv_dataset(split="test"):
+    import xml.etree.ElementTree as ET
+    import json
+
+    # XML data as a string
+    xml_data = '''<?xml version="1.0" encoding="UTF-8" ?>
+    <Machine-Reading-Corpus-File>
+        <ProblemSet>
+            <Problem ID="nluds-0001" Grade="1" Source="http://www.k5learning.com">
+                <Body>Seven red apples and two green apples are in the basket.</Body>
+                <Question>How many apples are in the basket?</Question>
+                <Solution-Type>Addition</Solution-Type>
+                <Answer>9 (apples)</Answer>
+                <Formula>7+2=9</Formula>
+            </Problem>
+        </ProblemSet>
+    </Machine-Reading-Corpus-File>'''
+
+    # Parse the XML
+    root = ET.fromstring(xml_data)
+
+    # Function to parse the XML and convert to dictionary
+    def xml_to_dict(element):
+        # Create a dictionary from the element attributes
+        result = element.attrib
+        
+        # Iterate over child elements
+        for child in element:
+            # If the child has further children, treat it as a sub-dictionary
+            if child:
+                result[child.tag] = xml_to_dict(child)
+            else:
+                # Otherwise, just assign the text content
+                result[child.tag] = child.text
+        return result
+
+    # Convert the entire XML to a dictionary
+    data_dict = {root.tag: xml_to_dict(root)}
+
+    # Convert dictionary to JSON
+    json_data = json.dumps(data_dict, indent=4)
+
+    # Print the JSON data
+    print(json_data)
+
+
+def get_asdiv_dataset(output_dir):
+    # Get data splits
+    data_splits = ["train", "test"]
+
+    for split in data_splits:
+        save_path = output_dir + f"/{split}.json"
+        data_set = prep_gsm8k_dataset(split)
+
+        with open(save_path, "w") as fw:
+            json.dump(fp=fw, obj=data_set, indent=4, ensure_ascii=False)
+
+
+"""
+MATH dataset preparation and saving
+"""
+def prep_math_dataset(split="test"):
+    print(f'Preprocessing MATH {split} dataset')
+    dataset = datasets.load_dataset("lighteval/MATH", "all")
+    # import pdb; pdb.set_trace()
+
+    data_set = []
+
+    for idx, data in enumerate(dataset[split]):
+        # import pdb; pdb.set_trace()
+        instance = {
+            "question_id": str(idx+1),
+            "level": data["level"].replace("Level ", ""),
+            "type": data["type"],
+            "question": data["problem"],
+            "answer": data["solution"]
+        }
+        data_set.append(instance)
+    
+    print(f"Data size of {split}: {len(data_set)}")
+
+    return data_set
+
+
+def get_math_dataset(output_dir):
+    data_splits = ["train", "test"]
+
+    for split in data_splits:
+        save_path = output_dir + f"/{split}.json"
+        data_set = prep_math_dataset(split)
+
+        with open(save_path, "w") as fw:
+            json.dump(fp=fw, obj=data_set, indent=4, ensure_ascii=False)
+
+
+"""
+College dataset preparation and saving
+"""
+def prep_college_dataset(split="test"):
+    print(f'Preprocessing College {split} dataset')
+    input_path = f"./data/college/raw/full_{split}.json"
+    dataset = read_jsonl(input_path)
+
+    data_set, idx = [], 0
+
+    for data in dataset:
+        # import pdb; pdb.set_trace()
+        # print(data["data_source"])
+        if "college_math" in data["data_source"]:
+            # import pdb; pdb.set_trace()
+            instance = {
+                "question_id": str(idx+1),
+                "question": data["question"],
+                "answer": data["answer"]
+            }
+            idx += 1
+            data_set.append(instance)
+    
+    print(f"Data size of {split}: {len(data_set)}")
+
+    return data_set
+
+
+def get_college_dataset(output_dir):
+    data_splits = ["train", "test"]
+
+    for split in data_splits:
+        save_path = output_dir + f"/{split}.json"
+        data_set = prep_college_dataset(split)
+
+        with open(save_path, "w") as fw:
+            json.dump(fp=fw, obj=data_set, indent=4, ensure_ascii=False)
+
+
+"""
+TAL-SCQ dataset preparation and saving
+"""
+def prep_talscq_dataset(split="test"):
+    print(f'Preprocessing TAL-SCQ {split} dataset')
+    dataset = datasets.load_dataset("math-eval/TAL-SCQ5K", data_dir="TAL-SCQ5K-EN")
+    # import pdb; pdb.set_trace()
+
+    data_set = []
+
+    for idx, data in enumerate(dataset[split]):
+        # import pdb; pdb.set_trace()
+        answer_dict = {}
+        for answer in data["answer_option_list"]:
+            answer_dict[answer[0]["aoVal"]] = answer[0]["content"]
+
+        instance = {
+            "question_id": data["qid"],
+            "difficulty": data["difficulty"],
+            "question": data["problem"],
+            "answer": answer_dict[data["answer_value"]]
+        }
+        data_set.append(instance)
+    
+    print(f"Data size of {split}: {len(data_set)}")
+
+    return data_set
+
+
+def get_talscq_dataset(output_dir):
+    data_splits = ["test"]
+
+    for split in data_splits:
+        save_path = output_dir + f"/{split}.json"
+        data_set = prep_talscq_dataset(split)
+
+        with open(save_path, "w") as fw:
+            json.dump(fp=fw, obj=data_set, indent=4, ensure_ascii=False)
+
+
+"""
+Theorem dataset preparation and saving
+"""
+def prep_theorem_dataset(split="test"):
+    print(f'Preprocessing TheoremQA {split} dataset')
+    dataset = datasets.load_dataset("TIGER-Lab/TheoremQA")
+    # import pdb; pdb.set_trace()
+
+    data_set = []
+
+    for idx, data in enumerate(dataset[split]):
+        import pdb; pdb.set_trace()
+        instance = {
+            "question_id": str(idx+1),
+            "question": data["Question"],
+            "answer": data["Answer"],
+            "answer_type": data["Answer_type"],
+            "Picture": False if data["Picture"] == None else True
+        }
+        data_set.append(instance)
+    
+    print(f"Data size of {split}: {len(data_set)}")
+
+    return data_set
+
+
+def get_theorem_dataset(output_dir):
+    data_splits = ["test"]
+
+    for split in data_splits:
+        save_path = output_dir + f"/{split}.json"
+        data_set = prep_theorem_dataset(split)
+
+        with open(save_path, "w") as fw:
+            json.dump(fp=fw, obj=data_set, indent=4, ensure_ascii=False)
+
 
 if __name__=="__main__":
     # Output directory
@@ -168,10 +381,18 @@ if __name__=="__main__":
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    if args.dataset == "trivia_qa":
+    if args.dataset == "triviaqa":
         get_triviaqa_dataset(output_dir)
-    elif args.dataset == "web_qa":
+    elif args.dataset == "webqa":
         get_webqa_dataset(output_dir)
     elif args.dataset == "gsm8k":
         get_gsm8k_dataset(output_dir)
+    elif args.dataset == "math":
+        get_math_dataset(output_dir)
+    elif args.dataset == "college":
+        get_college_dataset(output_dir)
+    elif args.dataset == "theorem":
+        get_theorem_dataset(output_dir)
+    elif args.dataset == "talscq":
+        get_talscq_dataset(output_dir)
 

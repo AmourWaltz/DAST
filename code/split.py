@@ -10,21 +10,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from tqdm import tqdm, trange
-from ipdb import set_trace
+# from ipdb import set_trace
 
-import utils
-from utils import Levels
+from utils import *
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_name', type=str, default="llama3", help="Model name.", choices=["llama3", "qwen2"])
-parser.add_argument('--dataset', type=str, default="gsm8k", help="Dataset name.", choices=["triviaqa", "webqa", "gsm8k"])
-parser.add_argument('--data_file', type=str, default="test", help="Data file name.", choices=["validation", "train", # for triviaqa
-                                                                       "validation", "me_train", # for webqa
-                                                                       "train", "test" # for gsm8k
-                    ])
-parser.add_argument('--suffix', type=str, default="sample_8shot", help="File name to save the results.")
+parser.add_argument('--stage', type=str, default="prep", help="Different stages.", choices=["prep", "dpo"])
+parser.add_argument('--model_name', type=str, default="llama3", help="Model name.", choices=model_path_dict.keys())
+parser.add_argument('--dataset', type=str, default="gsm8k", help="Dataset name.", choices=dataset_list)
+parser.add_argument('--data_file', type=str, default="train", help="Data file name.", choices=["train", "test"])
+parser.add_argument('--model_suffix', type=str, default="train_sft_base_bnb_icl", help="Model suffix.")
+parser.add_argument('--data_suffix', type=str, default="sample_8shot", help="File name to save the results.")
 parser.add_argument('--input_dir', type=str, default="./data/{}/prep/")
 parser.add_argument('--output_dir', type=str, default="./data/{}/split/")
+parser.add_argument('--split_num', type=int, default=0, help="Number of splits.")
+parser.add_argument('--icl_use', type=bool, default=False, help="Use few-shot prompt or not.")
+parser.add_argument('--vllm_use', type=bool, default=False, help="Use few-shot prompt or not.")
+parser.add_argument('--split_id', type=int, default=0, help="Split ID.")
+parser.add_argument('--max_length', type=int, default=1024, help="Max length of the input.")
 
 args = parser.parse_args()
 
@@ -90,11 +93,11 @@ def known_level(greedy_score, sample_score, dataset):
             return Levels[1]
         elif 0.70 < greedy_score < 1:
             return Levels[2]
-        elif 0.40 < greedy_score <= 0.70:
+        elif 0.40 <= greedy_score <= 0.70:
             return Levels[3]
-        elif 0.20 < greedy_score <= 0.40:
+        elif 0.10 < greedy_score < 0.40:
             return Levels[4]
-        elif 0 < greedy_score <= 0.20:
+        elif 0 < greedy_score <= 0.10:
             return Levels[5]
 
     if sample_score > 0:
@@ -111,6 +114,7 @@ def category_calculate(greedy_scores, sample_scores, dataset):
     """
     for greedy_score, sample_score in zip(greedy_scores, sample_scores):
         data_known = known_level(greedy_score, sample_score, dataset)
+        # print(data_known)
         if data_known == Levels[1]:
             num_certain += 1
             continue
@@ -129,7 +133,11 @@ def category_calculate(greedy_scores, sample_scores, dataset):
         elif data_known == Levels[6]:
             num_unknown += 1
             continue
-
+        else:
+            raise ValueError(f"Unknown data known level: {data_known}")
+    
+    # print("len(greedy_scores): ", len(sample_scores))
+    # print(f"num_certain: {num_certain}, num_high: {num_high}, num_medium: {num_medium}, num_low: {num_low}, num_weak: {num_weak}, num_unknown: {num_unknown}")
     assert num_certain + num_high + num_medium + num_low + num_weak + num_unknown == len(greedy_scores)
 
     categories = {
@@ -144,7 +152,7 @@ def category_calculate(greedy_scores, sample_scores, dataset):
     return categories    
 
 
-def data_split():
+def data_split_prep():
     # Format output file.
     args.output_dir = args.output_dir.format(args.dataset)
     if not os.path.exists(args.output_dir):
@@ -160,7 +168,7 @@ def data_split():
     # Loading dataset.
     data_path = os.path.join(args.input_dir.format(args.dataset), 
                                   "{}_{}_{}_{}.json".format(args.model_name, args.dataset, args.data_file, args.suffix))
-    data_pool = utils.read_json(data_path)
+    data_pool = read_json(data_path)
     
     # Set logging.
     logging.basicConfig(
@@ -178,13 +186,28 @@ def data_split():
         greedy_scores.append(score["greedy_scores_avg"])
         if score["sample_scores"]:
             sample_scores.append(score["sample_scores_avg"])
+        else:
+            sample_scores.append(0)
 
     # Draw histogram.
     draw_scores_histogram(greedy_scores, sample_scores, args.output_dir)
-    categories = category_calculate(greedy_scores, sample_scores, args.output_dir, args.dataset)
+    categories = category_calculate(greedy_scores, sample_scores, args.dataset)
     logging.info(categories)
     draw_known_pie(categories, args.output_dir)
 
 
+def dpo_data_prep():
+    args.output_dir = "./data/{}/prep/"
+
+    args.output_dir = os.path.join(args.output_dir.format(args.dataset), "{}_{}_{}_{}". \
+                                   format(args.model_name, args.dataset, args.data_file, args.suffix))
+
+    if not os.path.exists(args.output_dir):
+        os.mkdir(args.output_dir)
+
+
 if __name__ == '__main__':
-    data_split()
+    if args.stage == "prep":
+        data_split_prep()
+    elif args.stage == "dpo":
+        dpo_data_prep()

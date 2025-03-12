@@ -1,0 +1,6 @@
+{
+    "description": "Standard English Math Reasoning Template.",
+    "instruction": "You are an excellent mathematician. Answer the following mathematical questions.",
+    "standard_prompt": "{instruction}\n\nQuestion: {question}\nResponse: ",
+    "output_split": "Question:"
+}
